@@ -68,7 +68,7 @@ class ChatServer
         EndPoint? endPoint = newClient.Client.RemoteEndPoint;
         Console.WriteLine($"Handling a new client from {endPoint}");
 
-        string welcomeMsg = "Welcome to the chat, please identify yourself in the format: 'name:{yourName}'\n";
+        string welcomeMsg = "Warm welcome from the server";
         _writeToNetStream(netStream, welcomeMsg);
 
         bool valid = false;
@@ -211,6 +211,7 @@ class ChatServer
 
     public void Shutdown()
     {
+        // TODO: let clients know we're closing
         Running = false;
         Console.WriteLine("Shutting down server");
     }
