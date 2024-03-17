@@ -50,18 +50,16 @@ class ChatClient
 
         chatInput.KeyDown += (args) =>
         {
-            /*
             if (args.KeyEvent.Key == Key.Enter && chatInput.Text != "")
             {
-                test.Add(chatInput.Text);
+                SendMessage((string)chatInput.Text);
                 chatInput.Text = "";
             }
-            */
         };
 
         Application.Top.Add(chatInput);
         Application.Top.Add(ChatMessages);
-
+        /*
         Func<MainLoop, bool> UpdateTimer = (mainLoop) =>
         {
             ChatMessages.SetSource(Messages);
@@ -69,7 +67,7 @@ class ChatClient
         };
 
         Application.MainLoop.AddTimeout(TimeSpan.FromSeconds(1), UpdateTimer);
-
+        */
         Application.Run();
         Application.Shutdown();
     }
@@ -110,42 +108,18 @@ class ChatClient
         }
     }
 
-    public void SendMessages()
+    public void SendMessage(string msg)
     {
-        bool wasRunning = Running;
-
-        while (Running)
+        if (msg != string.Empty)
         {
-            Console.Write($"{Name}> ");
-            string? msg = Console.ReadLine();
-
-            if (msg.ToLower() == "quit" || msg.ToLower() == "exit")
-            {
-                Console.WriteLine("Disconnecting...");
-                Running = false;
-            }
-            else if (msg != string.Empty)
-            {
-                byte[] msgBuffer = Encoding.UTF8.GetBytes(msg);
-                _msgStream.Write(msgBuffer, 0, msgBuffer.Length);
-            }
-
-            Thread.Sleep(10);
-
-            if (_isDisconnected(_client))
-            {
-                Running = false;
-                Console.WriteLine("Server has disconnected us :(");
-            }
+            byte[] msgBuffer = Encoding.UTF8.GetBytes(msg);
+            _msgStream.Write(msgBuffer, 0, msgBuffer.Length);
         }
-
-        _cleanupNetworkResources();
-        if (wasRunning)
-            Console.WriteLine("Disconnected");
     }
 
     public void ReceiveMessages()
     {
+        bool wasRunning = Running;
         while (Running)
         {
             int messageLength = _client.Available;
@@ -157,10 +131,26 @@ class ChatClient
                 string msg = Encoding.UTF8.GetString(msgBuffer);
                 msg = msg.TrimEnd('\r', '\n');
                 Messages.Add(msg);
+                if (Application.MainLoop != null)
+                {
+                    Application.MainLoop.Invoke(() =>
+                    {
+                        ChatMessages.SetSource(Messages);
+                    });
+                }
+
             }
 
             Thread.Sleep(10);
+            if (_isDisconnected(_client))
+            {
+                Running = false;
+                Console.WriteLine("Server has disconnected us :(");
+            }
         }
+        _cleanupNetworkResources();
+        if (wasRunning)
+            Console.WriteLine("Disconnected");
     }
 
     private static bool _isDisconnected(TcpClient client)
@@ -189,11 +179,6 @@ class ChatClient
         ChatClient client = new("70.34.200.185", 6969, "bob");
         client.Connect();
         client.SetupUI();
-
-
-
-
-
 
         /*
         Console.WriteLine("Enter a name to use:");

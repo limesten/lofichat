@@ -56,6 +56,7 @@ class ChatServer
 
     private void _handleNewConnection()
     {
+        // TODO: Add token that clients need to provide
         TcpClient newClient = _listener.AcceptTcpClient();
         NetworkStream netStream = newClient.GetStream();
 
@@ -130,6 +131,7 @@ class ChatServer
 
     private void _checkFoNewMessages()
     {
+        // TODO: Detect and ban spammers
         lock (_clientsLock)
         {
             foreach (TcpClient c in _clients)
