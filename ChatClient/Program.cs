@@ -17,9 +17,18 @@ class ChatClient
     {
         Application.Init();
 
-        TextField chatInput = new("")
+        Label chatInputSymbol = new()
         {
             X = 0,
+            Y = Pos.Bottom(Application.Top) - 1,
+            Width = 2,
+            Height = 1,
+            Text = "> "
+        };
+
+        TextField chatInput = new("")
+        {
+            X = 2,
             Y = Pos.Bottom(Application.Top) - 1,
             Width = Dim.Fill(),
             Height = 1,
@@ -78,11 +87,14 @@ class ChatClient
         ChatMessages.Y = 2;
         ChatMessages.Width = Dim.Fill();
         ChatMessages.Height = Dim.Fill(3);
+
         ChatMessages.ColorScheme = new Terminal.Gui.ColorScheme()
         {
             Normal = Terminal.Gui.Attribute.Make(Color.White, Color.Black),
             Focus = Terminal.Gui.Attribute.Make(Color.White, Color.Black)
         };
+
+        Messages.Add("Welcome to LofiChat. Enter /help to view available commands.");
         ChatMessages.SetSource(Messages);
 
         chatInput.KeyDown += async (args) =>
@@ -96,19 +108,20 @@ class ChatClient
                 {
                     await _slashCommandHandler(input);
                 }
-                else if (_client.Connected)
+                else if (_client != null && _client.Connected)
                 {
                     await SendMessage(input);
                 }
             }
         };
 
+
+        Application.Top.Add(chatInputSymbol);
         Application.Top.Add(chatInput);
         Application.Top.Add(statusBar);
         Application.Top.Add(upperDivider);
         Application.Top.Add(lowerDivider);
         Application.Top.Add(ChatMessages);
-
         Application.Run();
         Application.Shutdown();
     }
@@ -128,7 +141,6 @@ class ChatClient
 
         if (_client.Connected)
         {
-            //Console.WriteLine($"Connected to the server at {endPoint}");
             _msgStream = _client.GetStream();
 
             byte[] msgBuffer = Encoding.UTF8.GetBytes($"name:{name}");
@@ -162,6 +174,12 @@ class ChatClient
 
         switch (commandParts[0])
         {
+            case "/help":
+                Messages.Add("/connect [IP_ADDRESS] [PORT] [USERNAME]");
+                Messages.Add("/leave - Disconnect from the chat server");
+                Messages.Add("CTRL + Q - Exits the program");
+                ChatMessages.SetSource(Messages);
+                break;
             case "/connect":
                 if (commandParts.Length == 4)
                 {
@@ -173,13 +191,24 @@ class ChatClient
                     bool success = int.TryParse(portArg, out port);
                     if (!success)
                     {
+                        Messages.Add("/connect failed - Invalid port number");
+                        ChatMessages.SetSource(Messages);
                         return;
                     }
                     await Connect(addressArg, port, nameArg);
                 }
+                else
+                {
+                    Messages.Add("/connect failed - Invalid amount of arguments");
+                    ChatMessages.SetSource(Messages);
+                }
                 break;
-            case "/quit":
+            case "/leave":
                 _cleanupNetworkResources();
+                break;
+            default:
+                Messages.Add("Unknown command");
+                ChatMessages.SetSource(Messages);
                 break;
         }
     }
@@ -195,6 +224,7 @@ class ChatClient
 
     public void ReceiveMessages()
     {
+
         while (Running)
         {
             try
@@ -209,25 +239,33 @@ class ChatClient
                     msg = msg.TrimEnd('\r', '\n');
                     Messages.Add(msg);
 
+                    int chatMessagesHeight;
+                    bool ok = ChatMessages.GetCurrentHeight(out chatMessagesHeight);
+                    if (!ok)
+                    {
+                        throw new Exception("Failed to get chat message window height.");
+                    }
+
                     Application.MainLoop.Invoke(() =>
                     {
                         ChatMessages.SetSource(Messages);
+                        ChatMessages.ScrollDown(Messages.Count - chatMessagesHeight);
                     });
                 }
 
-                Thread.Sleep(10);
+                Thread.Sleep(100);
                 if (_isDisconnected(_client))
                 {
                     Running = false;
                 }
             }
-            catch (Exception)
+            catch (Exception ex)
             {
+                Console.WriteLine(ex);
                 return;
             }
         }
         _cleanupNetworkResources();
-
     }
 
     private static bool _isDisconnected(TcpClient client)
@@ -258,7 +296,6 @@ class ChatClient
     {
         ChatClient client = new();
         client.Start();
-
     }
 }
 
