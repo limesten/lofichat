@@ -8,6 +8,7 @@ class ChatServer
     private List<TcpClient> _clients = new();
     private Dictionary<TcpClient, string> _names = new();
     private Queue<string> _messageQueue = new();
+    private Dictionary<TcpClient, DateTime> _lastMessageTimestamps = new();
     private readonly object _clientsLock = new();
     private readonly object _namesLock = new();
     private readonly object _messageQueueLock = new();
@@ -78,7 +79,7 @@ class ChatServer
             if (bytesRead == 0)
             {
                 Console.WriteLine($"Received empty message from {endPoint}");
-                string emptyMsgResponse = "Received empty message, please identify yourself in the format: 'name:{yourName}'\n";
+                string emptyMsgResponse = "[SERVER] Error: received empty message\n";
                 WriteToNetStream(netStream, emptyMsgResponse);
                 continue;
             }
@@ -87,7 +88,7 @@ class ChatServer
             if (!msg.StartsWith("name:"))
             {
                 Console.WriteLine($"Received message in wrong format from {endPoint}");
-                string wrongMsgFormatResponse = "Wrong format received, please identify yourself in the format: 'name:{yourName}'\n";
+                string wrongMsgFormatResponse = "[SERVER] Error: wrong message format\n";
                 WriteToNetStream(netStream, wrongMsgFormatResponse);
                 continue;
             }
@@ -96,7 +97,7 @@ class ChatServer
             if (name == string.Empty)
             {
                 Console.WriteLine($"Received message in correct format but with name missing from {endPoint}");
-                string nameMissingResponse = "Name missing. Please include your name in the format: 'name:{yourName}'\n";
+                string nameMissingResponse = "[SERVER] Error: connection refused due to missing name parameter\n";
                 WriteToNetStream(netStream, nameMissingResponse);
                 continue;
             }
@@ -104,7 +105,7 @@ class ChatServer
             if (_names.ContainsValue(name))
             {
                 Console.WriteLine($"Received message in correct format but with name missing from {endPoint}");
-                string nameTakenResponse = "Name is already taken, please enter another name.\n";
+                string nameTakenResponse = "[SERVER] Error: name is already taken\n";
                 WriteToNetStream(netStream, nameTakenResponse);
                 continue;
             }
@@ -115,7 +116,7 @@ class ChatServer
 
             Console.WriteLine($"{endPoint} is a new client with the name {name}");
 
-            lock (_messageQueueLock) _messageQueue.Enqueue($"{name} has joined the chat!\n");
+            lock (_messageQueueLock) _messageQueue.Enqueue($"[SERVER] {name} has joined the chat!\n");
 
         } while (!valid);
     }
@@ -136,12 +137,22 @@ class ChatServer
                 int messageLength = c.Available;
                 if (messageLength > 0)
                 {
+                    if (_lastMessageTimestamps.ContainsKey(c))
+                    {
+                        TimeSpan timeSinceLastMessage = DateTime.UtcNow - _lastMessageTimestamps[c];
+                        if (timeSinceLastMessage.TotalSeconds < 1)
+                        {
+                            NetworkStream netStream = c.GetStream();
+                            WriteToNetStream(netStream, "[SERVER] you need to wait 1 second between messages\n");
+                        }
+                    }
                     byte[] msgBuffer = new byte[messageLength];
                     c.GetStream().Read(msgBuffer, 0, messageLength);
 
                     string msg = $"{_names[c]}: {Encoding.UTF8.GetString(msgBuffer)}";
                     Console.WriteLine(msg.Replace("\r\n", ""));
                     lock (_messageQueueLock) _messageQueue.Enqueue(msg.Replace("\r\n", ""));
+                    _lastMessageTimestamps[c] = DateTime.UtcNow;
                 }
             }
         }
@@ -176,7 +187,7 @@ class ChatServer
                 {
                     string name = _names[c];
                     Console.WriteLine($"{name} has left.");
-                    lock (_messageQueueLock) _messageQueue.Enqueue($"{name} has left the chat.");
+                    lock (_messageQueueLock) _messageQueue.Enqueue($"[SERVER] {name} has left the chat.");
 
                     _clients.Remove(c);
                     lock (_namesLock) _names.Remove(c);
