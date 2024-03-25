@@ -34,11 +34,11 @@ class ChatServer
         while (Running)
         {
             if (_listener.Pending())
-                Task.Run(() => _handleNewConnection());
+                Task.Run(() => HandleNewConnection());
 
-            Task.Run(() => _checkForDisconnects());
-            Task.Run(() => _checkFoNewMessages());
-            Task.Run(() => _sendMessages());
+            Task.Run(() => CheckForDisconnects());
+            Task.Run(() => CheckForNewMessages());
+            Task.Run(() => SendMessages());
 
             Thread.Sleep(10);
         }
@@ -47,14 +47,14 @@ class ChatServer
         {
             foreach (TcpClient m in _clients)
             {
-                _cleanupClient(m);
+                CleanupClient(m);
             }
         }
         _listener.Stop();
         Console.WriteLine("Server is shutting down...");
     }
 
-    private void _handleNewConnection()
+    private void HandleNewConnection()
     {
         // TODO: Add token that clients need to provide
         TcpClient newClient = _listener.AcceptTcpClient();
@@ -69,9 +69,6 @@ class ChatServer
         EndPoint? endPoint = newClient.Client.RemoteEndPoint;
         Console.WriteLine($"Handling a new client from {endPoint}");
 
-        string welcomeMsg = "Warm welcome from the server";
-        _writeToNetStream(netStream, welcomeMsg);
-
         bool valid = false;
         do
         {
@@ -82,7 +79,7 @@ class ChatServer
             {
                 Console.WriteLine($"Received empty message from {endPoint}");
                 string emptyMsgResponse = "Received empty message, please identify yourself in the format: 'name:{yourName}'\n";
-                _writeToNetStream(netStream, emptyMsgResponse);
+                WriteToNetStream(netStream, emptyMsgResponse);
                 continue;
             }
 
@@ -91,7 +88,7 @@ class ChatServer
             {
                 Console.WriteLine($"Received message in wrong format from {endPoint}");
                 string wrongMsgFormatResponse = "Wrong format received, please identify yourself in the format: 'name:{yourName}'\n";
-                _writeToNetStream(netStream, wrongMsgFormatResponse);
+                WriteToNetStream(netStream, wrongMsgFormatResponse);
                 continue;
             }
 
@@ -100,7 +97,7 @@ class ChatServer
             {
                 Console.WriteLine($"Received message in correct format but with name missing from {endPoint}");
                 string nameMissingResponse = "Name missing. Please include your name in the format: 'name:{yourName}'\n";
-                _writeToNetStream(netStream, nameMissingResponse);
+                WriteToNetStream(netStream, nameMissingResponse);
                 continue;
             }
 
@@ -108,7 +105,7 @@ class ChatServer
             {
                 Console.WriteLine($"Received message in correct format but with name missing from {endPoint}");
                 string nameTakenResponse = "Name is already taken, please enter another name.\n";
-                _writeToNetStream(netStream, nameTakenResponse);
+                WriteToNetStream(netStream, nameTakenResponse);
                 continue;
             }
 
@@ -116,20 +113,20 @@ class ChatServer
             lock (_namesLock) _names.Add(newClient, name);
             lock (_clientsLock) _clients.Add(newClient);
 
-            Console.WriteLine($"{endPoint} is a new messenger with the name {name}");
+            Console.WriteLine($"{endPoint} is a new client with the name {name}");
 
-            lock (_messageQueueLock) _messageQueue.Enqueue($"{name} has joined the chat!");
+            lock (_messageQueueLock) _messageQueue.Enqueue($"{name} has joined the chat!\n");
 
         } while (!valid);
     }
 
-    private void _writeToNetStream(NetworkStream netStream, string msg)
+    private void WriteToNetStream(NetworkStream netStream, string msg)
     {
         byte[] msgBuffer = Encoding.UTF8.GetBytes(msg);
         netStream.Write(msgBuffer, 0, msgBuffer.Length);
     }
 
-    private void _checkFoNewMessages()
+    private void CheckForNewMessages()
     {
         // TODO: Detect and ban spammers
         lock (_clientsLock)
@@ -150,7 +147,7 @@ class ChatServer
         }
     }
 
-    private void _sendMessages()
+    private void SendMessages()
     {
         lock (_messageQueueLock)
         {
@@ -169,13 +166,13 @@ class ChatServer
         }
     }
 
-    private void _checkForDisconnects()
+    private void CheckForDisconnects()
     {
         lock (_clientsLock)
         {
             foreach (TcpClient c in _clients.ToArray())
             {
-                if (_isDisconnected(c))
+                if (IsDisconnected(c))
                 {
                     string name = _names[c];
                     Console.WriteLine($"{name} has left.");
@@ -183,13 +180,13 @@ class ChatServer
 
                     _clients.Remove(c);
                     lock (_namesLock) _names.Remove(c);
-                    _cleanupClient(c);
+                    CleanupClient(c);
                 }
             }
         }
     }
 
-    private static void _cleanupClient(TcpClient client)
+    private static void CleanupClient(TcpClient client)
     {
         client.GetStream().Close();
         client.Close();
@@ -197,7 +194,7 @@ class ChatServer
 
     // Checks if a socket has disconnected
     // Adapted from -- http://stackoverflow.com/questions/722240/instantly-detect-client-disconnection-from-server-socket
-    private static bool _isDisconnected(TcpClient client)
+    private static bool IsDisconnected(TcpClient client)
     {
         try
         {

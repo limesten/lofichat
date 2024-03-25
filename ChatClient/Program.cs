@@ -238,7 +238,6 @@ class ChatClient
 
     private void ReceiveMessages()
     {
-
         while (Running)
         {
             try
