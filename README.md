@@ -4,7 +4,7 @@ Comfy multi user chat
 
 ## Demo
 
-![Alt Text](https://gifyu.com/image/SVkW8)
+![Alt Text](https://s9.gifyu.com/images/SVkW8.gif)
 
 ## Quick Start
 
