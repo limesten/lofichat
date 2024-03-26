@@ -5,10 +5,11 @@ using System.Text;
 class ChatServer
 {
     private TcpListener _listener;
-    private List<TcpClient> _clients = new();
+    private static List<TcpClient> _clients = new();
     private Dictionary<TcpClient, string> _names = new();
     private Queue<string> _messageQueue = new();
     private Dictionary<TcpClient, DateTime> _lastMessageTimestamps = new();
+    private Dictionary<IPAddress, int> _strikeCounts = new();
     private readonly object _clientsLock = new();
     private readonly object _namesLock = new();
     private readonly object _messageQueueLock = new();
@@ -16,6 +17,7 @@ class ChatServer
     public readonly int Port;
     public bool Running { get; private set; }
     public readonly int BufferSize = 2 * 1024; // 2kB
+    public const int StrikeLimit = 10;
     public ChatServer(string name, int port)
     {
         ChatName = name;
@@ -67,8 +69,25 @@ class ChatServer
         newClient.SendBufferSize = BufferSize;
         newClient.ReceiveBufferSize = BufferSize;
 
-        EndPoint? endPoint = newClient.Client.RemoteEndPoint;
-        Console.WriteLine($"Handling a new client from {endPoint}");
+        IPEndPoint? IPEndPoint = newClient.Client.RemoteEndPoint as IPEndPoint;
+        if (IPEndPoint == null)
+        {
+            Console.WriteLine("Couldn't get IP address from new client");
+            CleanupClient(newClient);
+            return;
+        }
+
+        if (_strikeCounts.ContainsKey(IPEndPoint.Address))
+        {
+            if (_strikeCounts[IPEndPoint.Address] >= StrikeLimit)
+            {
+                Console.WriteLine("Discarding banned IP connection attempt");
+                CleanupClient(newClient);
+                return;
+            }
+        }
+
+        Console.WriteLine($"Handling a new client from {IPEndPoint}");
 
         bool valid = false;
         do
@@ -78,7 +97,7 @@ class ChatServer
 
             if (bytesRead == 0)
             {
-                Console.WriteLine($"Received empty message from {endPoint}");
+                Console.WriteLine($"Received empty message from {IPEndPoint}");
                 string emptyMsgResponse = "[SERVER] Error: received empty message\n";
                 WriteToNetStream(netStream, emptyMsgResponse);
                 continue;
@@ -87,7 +106,7 @@ class ChatServer
             string msg = Encoding.UTF8.GetString(msgBuffer, 0, bytesRead);
             if (!msg.StartsWith("name:"))
             {
-                Console.WriteLine($"Received message in wrong format from {endPoint}");
+                Console.WriteLine($"Received message in wrong format from {IPEndPoint}");
                 string wrongMsgFormatResponse = "[SERVER] Error: wrong message format\n";
                 WriteToNetStream(netStream, wrongMsgFormatResponse);
                 continue;
@@ -96,7 +115,7 @@ class ChatServer
             string name = msg.Substring(msg.IndexOf(":") + 1).Replace("\r\n", "");
             if (name == string.Empty)
             {
-                Console.WriteLine($"Received message in correct format but with name missing from {endPoint}");
+                Console.WriteLine($"Received message in correct format but with name missing from {IPEndPoint}");
                 string nameMissingResponse = "[SERVER] Error: connection refused due to missing name parameter\n";
                 WriteToNetStream(netStream, nameMissingResponse);
                 continue;
@@ -104,7 +123,7 @@ class ChatServer
 
             if (_names.ContainsValue(name))
             {
-                Console.WriteLine($"Received message in correct format but with name missing from {endPoint}");
+                Console.WriteLine($"Received message in correct format but with name missing from {IPEndPoint}");
                 string nameTakenResponse = "[SERVER] Error: name is already taken\n";
                 WriteToNetStream(netStream, nameTakenResponse);
                 continue;
@@ -114,7 +133,7 @@ class ChatServer
             lock (_namesLock) _names.Add(newClient, name);
             lock (_clientsLock) _clients.Add(newClient);
 
-            Console.WriteLine($"{endPoint} is a new client with the name {name}");
+            Console.WriteLine($"{IPEndPoint} is a new client with the name {name}");
 
             lock (_messageQueueLock) _messageQueue.Enqueue($"[SERVER] {name} has joined the chat!\n");
 
@@ -129,7 +148,6 @@ class ChatServer
 
     private void CheckForNewMessages()
     {
-        // TODO: Detect and ban spammers
         lock (_clientsLock)
         {
             foreach (TcpClient c in _clients)
@@ -137,17 +155,44 @@ class ChatServer
                 int messageLength = c.Available;
                 if (messageLength > 0)
                 {
+                    byte[] msgBuffer = new byte[messageLength];
+                    c.GetStream().Read(msgBuffer, 0, messageLength);
+
+                    IPEndPoint? IPEndPoint = c.Client.RemoteEndPoint as IPEndPoint;
+                    if (IPEndPoint == null)
+                    {
+                        Console.WriteLine("Couldn't get IP address from new client");
+                        CleanupClient(c);
+                        return;
+                    }
+
+                    if (_strikeCounts.ContainsKey(IPEndPoint.Address))
+                    {
+                        if (_strikeCounts[IPEndPoint.Address] >= StrikeLimit)
+                        {
+                            Console.WriteLine($"Banning {IPEndPoint.Address}");
+                            CleanupClient(c);
+                            continue;
+                        }
+                    }
+
                     if (_lastMessageTimestamps.ContainsKey(c))
                     {
                         TimeSpan timeSinceLastMessage = DateTime.UtcNow - _lastMessageTimestamps[c];
+                        if (!_strikeCounts.ContainsKey(IPEndPoint.Address))
+                        {
+                            _strikeCounts[IPEndPoint.Address] = 0;
+                        }
+
                         if (timeSinceLastMessage.TotalSeconds < 1)
                         {
-                            NetworkStream netStream = c.GetStream();
-                            WriteToNetStream(netStream, "[SERVER] you need to wait 1 second between messages\n");
+                            _strikeCounts[IPEndPoint.Address] += 1;
+                            byte[] responseBuffer = Encoding.UTF8.GetBytes("[SERVER] you need to wait 1 second between messages\n");
+                            c.GetStream().Write(responseBuffer, 0, responseBuffer.Length);
+                            continue;
                         }
+                        _strikeCounts[IPEndPoint.Address] -= 1;
                     }
-                    byte[] msgBuffer = new byte[messageLength];
-                    c.GetStream().Read(msgBuffer, 0, messageLength);
 
                     string msg = $"{_names[c]}: {Encoding.UTF8.GetString(msgBuffer)}";
                     Console.WriteLine(msg.Replace("\r\n", ""));
@@ -201,6 +246,7 @@ class ChatServer
     {
         client.GetStream().Close();
         client.Close();
+        _clients.Remove(client);
     }
 
     // Checks if a socket has disconnected
